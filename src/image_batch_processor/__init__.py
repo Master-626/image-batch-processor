@@ -1,7 +1,7 @@
 """
 image-batch-processor
 
-A powerful, robust batch image processing toolkit.
+Local microscopy display exports and general batch image tools.
 """
 
 from .core import BatchProcessor, ProcessOptions
@@ -12,7 +12,7 @@ from .operations import (
     convert_image_format,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "BatchProcessor",
     "ProcessOptions",

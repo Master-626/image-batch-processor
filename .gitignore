@@ -20,6 +20,7 @@ wheels/
 *.egg
 .pytest_cache/
 .venv
+.venv-*/
 env/
 venv/
 ENV/
@@ -29,3 +30,5 @@ ENV/
 *.webp
 *.bmp
 *.tiff
+*.tif
+!docs/synthetic-preview.png

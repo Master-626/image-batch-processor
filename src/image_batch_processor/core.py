@@ -26,9 +26,9 @@ class ProcessOptions:
 
 
 class BatchProcessor:
-    """Batch image processor with concurrent support."""
+    """Legacy general-purpose batch processor (sequential)."""
 
-    SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
+    SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 
     def __init__(self, options: ProcessOptions, workers: int = 4):
         self.options = options
@@ -69,7 +69,10 @@ class BatchProcessor:
                         quality=self.options.quality,
                     )
                 else:
-                    save_format = input_path.suffix[1:].upper()
+                    # Pillow expects JPEG/TIFF, not the extension aliases JPG/TIF.
+                    save_format = {"JPG": "JPEG", "TIF": "TIFF"}.get(
+                        input_path.suffix[1:].upper(), input_path.suffix[1:].upper()
+                    )
 
                 # Save
                 output_path.parent.mkdir(parents=True, exist_ok=True)

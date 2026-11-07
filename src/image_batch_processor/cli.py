@@ -22,7 +22,7 @@ from .core import BatchProcessor, ProcessOptions
 @click.option("-f", "--format", "output_format", default=None, help="Output format (jpeg, png, webp)")
 @click.option("-q", "--quality", type=int, default=90, help="Output quality (1-100)")
 @click.option("-R", "--recursive", is_flag=True, help="Recursively process subdirectories")
-@click.option("-j", "--workers", type=int, default=4, help="Number of worker processes")
+@click.option("-j", "--workers", type=int, default=4, help="Legacy option; processing is currently sequential")
 def main(input_dir, output_dir, width, height, scale, keep_aspect, rotate_angle,
          watermark_text, watermark_pos, watermark_opacity, output_format,
          quality, recursive, workers):
