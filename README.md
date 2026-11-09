@@ -115,7 +115,21 @@ ibp photos -o resized --scale 0.5 --format png
 ibp --help
 ```
 
-These legacy resize/rotate/watermark tools are **not the microscopy workflow** and do not provide its provenance/calibration safeguards. Use separate input/output folders and backups. The legacy `--workers` argument is retained for compatibility, but processing is sequential. The earlier concurrency claim has been removed.
+These resize/rotate/watermark tools are **not the microscopy workflow** and do not provide its provenance/calibration safeguards. They now preflight the whole batch for filename collisions, existing destinations, overlapping input/output directories, and symbolic links before writing anything. Input files remain read-only, and output files are created exclusively, never replaced.
+
+The naming rule stays `source_stem.selected_extension`. For example, converting both `sample.jpg` and `sample.png` to WebP would produce `sample.webp` twice, so the entire batch is rejected before output begins. Rename the source files or process them into separate output directories. Existing output folders are allowed only when every planned file is new; unrelated files are retained. There is no overwrite switch.
+
+Name checks are deliberately conservative on all systems: case-insensitive and Unicode-normalized aliases, file-versus-directory conflicts, Windows reserved names, symbolic links, and Windows reparse points within traversed paths are rejected. Use separate, non-overlapping input/output folders. Source-root aliases are resolved for overlap checks; do not change directories or links while a run is active.
+
+The Python batch API raises `BatchSafetyError` for preflight failures. A direct `process_file` call keeps its boolean API and returns `False` when a destination exists or processing fails; its explicitly supplied parent directory is resolved as the output root. Successful earlier files are retained if a later image cannot be decoded or encoded, with accurate success/failure counts. The CLI exits nonzero on preflight errors, empty batches, or any failed image, so scripts can detect incomplete work.
+
+Encoding completes in memory before an output file is created. After a handled write error or keyboard interrupt, cleanup attempts to remove only the incomplete file whose ownership it can still verify; this cleanup is best effort. A forced termination or power failure can still leave a partial file; the next run refuses to overwrite it. The batch is not a filesystem transaction, and concurrent directory/link changes by another program are outside the safety contract. Keep backups. The legacy `--workers` argument is retained for compatibility, but processing is sequential.
+
+### Python compatibility
+
+Version 0.2.0 raised the minimum from Python 3.8 to **Python 3.10** for the combined microscopy/general-image package and its dependencies. This is a breaking compatibility change, not just a documentation update. Use a separate Python 3.10+ virtual environment; do not replace a system Python installation. This file-safety repair does not raise the minimum again.
+
+Python 3.8/3.9 support is not claimed or tested for this release. A future legacy-only maintenance line would need compatible dependency bounds and real tests on those interpreters before it could be offered. Installing an older commit is not a remedy for the overwrite defects. See [CHANGELOG.md](CHANGELOG.md) for migration details.
 
 ## Development
 
@@ -125,7 +139,7 @@ python -m pytest -q
 python -m build
 ```
 
-Tests use generated artificial arrays only. They cover exact intensity mapping, crop/bar geometry, original-file preservation, byte-identical replay, changed source/output hashes, invalid calibration, malformed TIFFs, unsupported dimensions/types, filename collisions, output protection, and legacy image operations. CI is configured for Python 3.10/3.12 on Linux, Windows, and macOS; check the actual run before assuming a platform has passed.
+Tests use generated artificial arrays only. They cover exact intensity mapping, crop/bar geometry, original-file preservation, byte-identical replay, changed source/output hashes, invalid calibration, malformed TIFFs, unsupported dimensions/types, filename collisions, output protection, and legacy image operations. Legacy batch regressions also cover case/Unicode aliases, hard links, recursive file/directory conflicts, existing targets, exclusive-create races, interrupted writes, and CLI exit codes. CI is configured for Python 3.10/3.12 on Linux, Windows, and macOS; check the actual run before assuming a platform has passed.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for small, testable contributions and [the validation notes](docs/validation.md) for scope and reproducibility details.
 

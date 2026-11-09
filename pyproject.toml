@@ -48,7 +48,7 @@ Issue-Tracker = "https://github.com/Master-626/image-batch-processor/issues"
 [tool.hatch.build.targets.sdist]
 include = [
     "/src", "/tests", "/examples", "/docs", "/.github",
-    "/README.md", "/CONTRIBUTING.md", "/LICENSE", "/pyproject.toml", "/.gitignore",
+    "/README.md", "/CONTRIBUTING.md", "/CHANGELOG.md", "/LICENSE", "/pyproject.toml", "/.gitignore",
 ]
 
 [tool.hatch.build.targets.wheel]

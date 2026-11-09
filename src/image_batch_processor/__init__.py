@@ -4,7 +4,7 @@ image-batch-processor
 Local microscopy display exports and general batch image tools.
 """
 
-from .core import BatchProcessor, ProcessOptions
+from .core import BatchProcessor, BatchSafetyError, ProcessOptions
 from .operations import (
     resize_image,
     rotate_image,
@@ -15,6 +15,7 @@ from .operations import (
 __version__ = "0.2.0"
 __all__ = [
     "BatchProcessor",
+    "BatchSafetyError",
     "ProcessOptions",
     "resize_image",
     "rotate_image",
