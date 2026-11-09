@@ -5,7 +5,7 @@ CLI interface for image-batch-processor.
 import click
 from pathlib import Path
 
-from .core import BatchProcessor, ProcessOptions
+from .core import BatchProcessor, BatchSafetyError, ProcessOptions
 
 
 @click.command()
@@ -47,13 +47,18 @@ def main(input_dir, output_dir, width, height, scale, keep_aspect, rotate_angle,
     click.echo("")
 
     processor = BatchProcessor(options=options, workers=workers)
-    results = processor.process_directory(
-        input_dir=str(input_dir),
-        output_dir=str(output_dir),
-        recursive=recursive,
-    )
+    try:
+        results = processor.process_directory(
+            input_dir=str(input_dir),
+            output_dir=str(output_dir),
+            recursive=recursive,
+        )
+    except (BatchSafetyError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
-    click.echo(f"✅ Done! Total: {results['total']}, Success: {results['success']}, Failed: {results['failed']}")
+    click.echo(f"Total: {results['total']}, Success: {results['success']}, Failed: {results['failed']}")
+    if results["failed"]:
+        raise click.ClickException("One or more images failed; successful outputs were kept.")
 
 
 if __name__ == "__main__":
