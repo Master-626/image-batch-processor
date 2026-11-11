@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased: input checks, format conversion, and inspect
+
+- Reject TIFF names that collide after Unicode NFC normalization and case folding, and reject Windows-reserved or otherwise non-portable TIFF names before any output directory is created.
+- Treat width/height `0` as invalid instead of ignoring that side. Reject non-positive or non-finite scale, quality outside 1–100, and watermark opacity outside 0–1 before a batch writes files. When `scale` is set it still takes precedence over width and height. A single width or height still scales the other side proportionally.
+- Convert modes a target format cannot encode (LA or CMYK to JPEG/PNG/BMP, and the same class of mismatch) to RGB. Modes the format can already store, including LA PNG and RGBA PNG, are unchanged.
+- Add `ibp-micro inspect`. It applies the same display, crop, and scale-bar checks as export and prints pixel length, dimensions, and clipped-pixel counts without creating a directory or confirming calibration.
+
 ## Unreleased: legacy batch file-safety repair
 
 - Reject all known batch output collisions before any processing begins, including shared stems after conversion, case/Unicode aliases, recursive file/directory conflicts, and existing targets. Preserve the established stem-plus-extension output names; do not rename implicitly.

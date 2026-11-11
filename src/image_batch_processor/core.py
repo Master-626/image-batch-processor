@@ -1,6 +1,7 @@
 """Sequential general-image processing with fail-closed output planning."""
 
 import io
+import math
 import os
 import stat
 import unicodedata
@@ -10,7 +11,7 @@ from typing import Optional
 
 from PIL import Image
 
-from .operations import resize_image, rotate_image, apply_text_watermark, convert_image_format
+from .operations import apply_text_watermark, convert_image_format, resize_image, rotate_image
 
 
 class BatchSafetyError(ValueError):
@@ -46,7 +47,7 @@ def _overlap(left, right):
     return a[:len(b)] == b or b[:len(a)] == a
 
 
-def _portable_name(name):
+def _portable_name(name, kind="Output"):
     # Reject names that may refer to a different path/device on Windows.
     devices = {"con", "prn", "aux", "nul", "conin$", "conout$"}
     devices.update("com" + str(i) for i in range(1, 10))
@@ -55,7 +56,7 @@ def _portable_name(name):
     if (not name or name.endswith((".", " ")) or
             any(ord(char) < 32 or char in '<>:"/\\|?*' for char in name) or
             _name_key(name.split(".", 1)[0]) in devices):
-        raise BatchSafetyError("Output name is not portable across filesystems: {!r}".format(name))
+        raise BatchSafetyError("{} name is not portable across filesystems: {!r}".format(kind, name))
 
 
 def _check_destination(path):
@@ -109,6 +110,34 @@ class BatchProcessor:
         self.options = options
         self.workers = workers
 
+    def _check_options(self):
+        """Reject option values that Pillow would ignore, clamp, or misread.
+
+        ``process_directory`` calls this before planning so the whole batch fails
+        closed. ``process_file`` keeps its boolean contract and turns the same
+        error into ``False``.
+        """
+        opts = self.options
+        for name in ("width", "height"):
+            value = getattr(opts, name)
+            if value is not None and (type(value) is not int or value <= 0):
+                raise BatchSafetyError("{} must be a positive integer.".format(name))
+        scale = opts.scale
+        if scale is not None and (
+            isinstance(scale, bool) or not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale <= 0
+        ):
+            raise BatchSafetyError("scale must be a positive finite number.")
+        if type(opts.quality) is not int or not 1 <= opts.quality <= 100:
+            raise BatchSafetyError("quality must be an integer from 1 to 100.")
+        opacity = opts.watermark_opacity
+        if (
+            isinstance(opacity, bool)
+            or not isinstance(opacity, (int, float))
+            or not math.isfinite(opacity)
+            or not 0 <= opacity <= 1
+        ):
+            raise BatchSafetyError("watermark opacity must be between 0 and 1.")
+
     def _format(self, source):
         requested = self.options.output_format
         if requested is None:
@@ -125,6 +154,11 @@ class BatchProcessor:
         prevents an output that appears after validation from being overwritten.
         The explicitly supplied parent directory is resolved as the output root.
         """
+        try:
+            self._check_options()
+        except BatchSafetyError as exc:
+            print("Error processing {}: {}".format(input_path, exc))
+            return False
         return self._process_file(input_path, output_path, resolve_parent=True)
 
     def _process_file(self, input_path, output_path, *, resolve_parent):
@@ -252,6 +286,7 @@ class BatchProcessor:
         Runtime decoding/encoding failures are counted and return a partial-success
         result. Successful earlier files are kept; this is not a batch transaction.
         """
+        self._check_options()
         plan = self._plan_directory(input_dir, output_dir, recursive)
         results = {"total": len(plan), "success": 0, "failed": 0}
         for source, destination in plan:

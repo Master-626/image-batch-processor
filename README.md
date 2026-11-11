@@ -1,5 +1,9 @@
 # Image Batch Processor
 
+## 中文摘要
+
+本工具在本地处理图像，不上传文件。`ibp-micro` 把同一文件夹里的二维、单通道、8/16 位灰度 TIFF，按同一组线性显示范围和可选裁剪导出为 8 位 PNG，并在图像下方的页脚绘制不重采样的整数像素比例尺。导出前必须自行确认所有图像共用同一方形像素标定（微米/像素）；程序不会读取 TIFF 中的标定元数据。每次成功运行都会写入可重放的 JSON/CSV 清单和 SHA-256。`ibp-micro inspect` 只检查比例尺像素数、裁剪范围，以及有多少像素落在显示范围之外，不写出文件。这些 PNG 仅供显示，不能用于定量测量。通用命令 `ibp` 仍可批量缩放、旋转、加水印和转换普通照片。需要 Python 3.10 及以上。
+
 **Local, traceable microscopy display exports from 2D TIFFs.** Apply one explicit intensity range and crop to a batch, draw a calibrated scale bar without resampling, and keep a replayable record of every input and output.
 
 [MIT license](LICENSE) · Python 3.10+ · Alpha
@@ -61,6 +65,17 @@ synthetic-export/
 
 Only `.tif`/`.tiff` files directly in the input folder are selected. Subfolders and other file types are ignored. The original extension is retained in each PNG name so `sample.tif` and `sample.tiff` cannot overwrite each other.
 
+## Preview a batch without writing files
+
+```bash
+ibp-micro inspect synthetic-input \
+  --display-min 1000 --display-max 40000 \
+  --pixel-size-um 0.5 --scale-bar-um 20 \
+  --synthetic-data
+```
+
+`inspect` selects the same files and applies the same display math, crop, and scale-bar rules as `export`. It prints the bar length in pixels, each file's dimensions and bit depth, and how many pixels fall outside the display range. It does not create a directory, write a manifest, or treat the pixel size as confirmed. On PowerShell, enter the command on one line.
+
 ## Use your own images
 
 First verify that all images have the **same square-pixel calibration** from acquisition records or a validated calibration workflow. The flag is your confirmation; the software cannot verify it. Do not copy the demo calibration into a real experiment.
@@ -99,7 +114,7 @@ Rejected explicitly:
 - RGB, palette, MINISWHITE, floating-point, signed, packed-bit, multichannel, multipage, Z/time stacks, pyramids/SubIFDs, or non-`YX` axes.
 - Non-top-left TIFF orientation; this tool will not silently rotate a source.
 - Source files over 256 MiB or images over 50 megapixels.
-- Input/output overlap, existing output folders, TIFF symbolic links, case-insensitive filename collisions, and formula-like/control-character filenames unsafe for CSV.
+- Input/output overlap, existing output folders, TIFF symbolic links, case-insensitive or Unicode-normalized filename collisions, Windows-reserved and other non-portable filenames, and formula-like/control-character filenames unsafe for CSV.
 - Unconfirmed/nonpositive calibration, invalid display ranges, crops outside any source, or bars/labels that do not fit.
 
 Compressed TIFF support depends on the installed decoder. The minimal install does not include `imagecodecs`; unsupported compression fails with a decoding error. Export an uncompressed 2D TIFF from your acquisition tool if needed. Proprietary microscope formats are out of scope.
@@ -111,7 +126,8 @@ Processing is sequential and uses a full-file/decoded-image snapshot in memory. 
 The original `ibp` / `image-batch-processor` CLI and Python API remain available for ordinary photos:
 
 ```bash
-ibp photos -o resized --scale 0.5 --format png
+ibp photos -o resized --scale 0.5 --format png --quality 90
+ibp photos -o wide --width 800 --height 600 --no-keep-aspect
 ibp --help
 ```
 
@@ -123,7 +139,7 @@ Name checks are deliberately conservative on all systems: case-insensitive and U
 
 The Python batch API raises `BatchSafetyError` for preflight failures. A direct `process_file` call keeps its boolean API and returns `False` when a destination exists or processing fails; its explicitly supplied parent directory is resolved as the output root. Successful earlier files are retained if a later image cannot be decoded or encoded, with accurate success/failure counts. The CLI exits nonzero on preflight errors, empty batches, or any failed image, so scripts can detect incomplete work.
 
-Encoding completes in memory before an output file is created. After a handled write error or keyboard interrupt, cleanup attempts to remove only the incomplete file whose ownership it can still verify; this cleanup is best effort. A forced termination or power failure can still leave a partial file; the next run refuses to overwrite it. The batch is not a filesystem transaction, and concurrent directory/link changes by another program are outside the safety contract. Keep backups. The legacy `--workers` argument is retained for compatibility, but processing is sequential.
+Encoding completes in memory before an output file is created. After a handled write error or keyboard interrupt, cleanup attempts to remove only the incomplete file whose ownership it can still verify; this cleanup is best effort. A forced termination or power failure can still leave a partial file; the next run refuses to overwrite it. The batch is not a filesystem transaction, and concurrent directory/link changes by another program are outside the safety contract. Keep backups. The legacy `--workers` argument is retained for compatibility, but processing is sequential. Width, height, and scale must be positive; a width or height of `0` is rejected rather than ignored. If `scale` is set, width and height are not used. One of width or height, without the other, still scales the remaining side proportionally. `--no-keep-aspect` applies only when both sides are set. Quality must be an integer from 1 to 100. Watermark text is white at the requested opacity, so it does not show on a white background. Grayscale-with-alpha PNG and CMYK JPEG files are converted to RGB when the chosen format cannot store that mode; modes the format can store are left as they are.
 
 ### Python compatibility
 
@@ -131,15 +147,50 @@ Version 0.2.0 raised the minimum from Python 3.8 to **Python 3.10** for the comb
 
 Python 3.8/3.9 support is not claimed or tested for this release. A future legacy-only maintenance line would need compatible dependency bounds and real tests on those interpreters before it could be offered. Installing an older commit is not a remedy for the overwrite defects. See [CHANGELOG.md](CHANGELOG.md) for migration details.
 
+## Options
+
+`ibp-micro export INPUT -o DIRECTORY`
+
+| Option | Required | Meaning |
+| --- | --- | --- |
+| `--display-min`, `--display-max` | yes | Shared raw intensity window. `0 <= min < max <= 65535`, and `max` must fit every file's bit depth. |
+| `--pixel-size-um` | yes | Micrometres per square pixel, typed by you. TIFF calibration tags are ignored. |
+| `--scale-bar-um` | yes | Physical bar length. It must be an integer number of pixels (absolute tolerance 1e-8). |
+| `--confirm-calibration` | yes | You checked that the same square-pixel size applies to every file. |
+| `--crop X Y WIDTH HEIGHT` | no | Shared zero-based crop in original pixels. Every file must contain it. |
+| `--synthetic-data` | no | Stamp `SYNTHETIC DEMO` and record that flag. |
+
+`ibp-micro inspect INPUT` takes the same display, crop, pixel-size, scale-bar, and synthetic-data options. It does not take an output directory or `--confirm-calibration`.
+
+`ibp-micro replay INPUT -o DIRECTORY --manifest FILE --confirm-calibration` repeats the recorded recipe and requires identical source and PNG SHA-256 hashes.
+
+`ibp INPUT -o DIRECTORY` (alias `image-batch-processor`)
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `-o, --output` | `./output` | Directory of new files. Existing planned names are never replaced. |
+| `-w, --width`, `-h, --height` | unset | Positive pixel sizes. `0` is invalid. |
+| `-s, --scale` | unset | Positive factor, for example `0.5`. If set, width and height are ignored. |
+| `--keep-aspect` / `--no-keep-aspect` | keep | Used when both width and height are set. One side alone always keeps aspect. |
+| `-r, --rotate` | `0` | Clockwise degrees. |
+| `--watermark-text` | unset | White text. Invisible on white images. |
+| `--watermark-pos` | `bottom-right` | `center`, `top-left`, `top-right`, `bottom-left`, `bottom-right`. |
+| `--watermark-opacity` | `0.5` | From 0 through 1. |
+| `-f, --format` | source suffix | `jpeg`, `jpg`, `png`, `webp`, `bmp`, `tif`, `tiff`. |
+| `-q, --quality` | `90` | Integer 1–100, applied to JPEG and WebP. |
+| `-R, --recursive` | off | Include subfolders. |
+| `-j, --workers` | `4` | Accepted for compatibility. Processing is sequential. |
+
 ## Development
 
 ```bash
 python -m pip install -e ".[dev]"
+python -m ruff check .
 python -m pytest -q
 python -m build
 ```
 
-Tests use generated artificial arrays only. They cover exact intensity mapping, crop/bar geometry, original-file preservation, byte-identical replay, changed source/output hashes, invalid calibration, malformed TIFFs, unsupported dimensions/types, filename collisions, output protection, and legacy image operations. Legacy batch regressions also cover case/Unicode aliases, hard links, recursive file/directory conflicts, existing targets, exclusive-create races, interrupted writes, and CLI exit codes. CI is configured for Python 3.10/3.12 on Linux, Windows, and macOS; check the actual run before assuming a platform has passed.
+Tests use generated artificial arrays only. They cover exact intensity mapping, crop/bar geometry, original-file preservation, byte-identical replay, changed source/output hashes, invalid calibration, malformed TIFFs, unsupported dimensions/types, filename collisions, output protection, inspect previews, and legacy image operations. Legacy batch regressions also cover case/Unicode aliases, hard links, recursive file/directory conflicts, existing targets, exclusive-create races, interrupted writes, zero dimensions, incompatible pixel modes, and CLI exit codes. CI runs ruff and pytest on Python 3.10, 3.11, and 3.12 for Linux, Windows, and macOS; check the actual run before assuming a platform has passed.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for small, testable contributions and [the validation notes](docs/validation.md) for scope and reproducibility details.
 

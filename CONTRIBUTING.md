@@ -2,7 +2,7 @@
 
 Start with a bug report or a small reproducible case. Use a generated synthetic TIFF, not confidential, patient, unpublished, or third-party images you do not have permission to share. Do not paste absolute private paths or acquisition metadata into issues without reviewing them.
 
-Run `python -m pip install -e ".[dev]"`, `python -m pytest -q`, and `python -m build` before submitting a change. Include tests that fail before the fix. Report operating system and package versions when a TIFF decoder or replay result differs.
+Run `python -m pip install -e ".[dev]"`, `python -m ruff check .`, `python -m pytest -q`, and `python -m build` before submitting a change. Include tests that fail before the fix. Report operating system and package versions when a TIFF decoder or replay result differs.
 
 Useful next contributions:
 
