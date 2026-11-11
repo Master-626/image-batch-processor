@@ -1,8 +1,8 @@
 import csv
 import hashlib
 import json
+import os
 from dataclasses import replace
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -11,7 +11,11 @@ from click.testing import CliRunner
 from PIL import Image
 
 from image_batch_processor.microscopy import (
-    ExportError, ExportSettings, export_batch, replay_batch,
+    ExportError,
+    ExportSettings,
+    export_batch,
+    inspect_batch,
+    replay_batch,
 )
 from image_batch_processor.microscopy_cli import main
 
@@ -270,6 +274,69 @@ def test_mixed_bit_depth_range_rejected(source, tmp_path, settings):
 def test_output_parent_required(source, tmp_path, settings):
     with pytest.raises(ExportError, match='parent must already exist'):
         export(source, tmp_path / 'missing' / 'out', settings)
+
+
+def test_unicode_normalized_tiff_names_collide(tmp_path, settings):
+    source = tmp_path / "input"
+    source.mkdir()
+    plane = np.zeros((128, 256), dtype=np.uint16)
+    tifffile.imwrite(source / "caf\u00e9.tif", plane)
+    tifffile.imwrite(source / "cafe\u0301.tif", plane)
+    if len(list(source.iterdir())) < 2:
+        pytest.skip("filesystem already normalizes these filenames together")
+    with pytest.raises(ExportError, match="Unicode-normalized"):
+        export(source, tmp_path / "out", settings)
+    assert not (tmp_path / "out").exists()
+
+
+def test_reserved_windows_tiff_name_rejected(tmp_path, settings):
+    if os.name == "nt":
+        pytest.skip("creating a reserved device name is not safe on Windows")
+    source = tmp_path / "input"
+    source.mkdir()
+    tifffile.imwrite(source / "CON.tif", np.zeros((128, 256), dtype=np.uint16))
+    with pytest.raises(ExportError, match="not portable"):
+        export(source, tmp_path / "out", settings)
+    assert not (tmp_path / "out").exists()
+
+
+def test_inspect_reports_geometry_without_writing(source, tmp_path, settings):
+    before = {path.name: path.read_bytes() for path in source.iterdir()}
+    report = inspect_batch(source, settings)
+    assert {path.name: path.read_bytes() for path in source.iterdir()} == before
+    assert list(tmp_path.rglob("*.png")) == []
+    assert list(tmp_path.rglob("manifest.json")) == []
+    assert report["file_count"] == 1
+    assert report["scale_bar_pixels"] == 40
+    assert report["scale_bar_label"] == "20 um"
+    assert report["calibration"].startswith("not verified")
+    record = report["files"][0]
+    assert record["source"] == "synthetic.tif"
+    assert record["source_sha256"] == hashlib.sha256(before["synthetic.tif"]).hexdigest()
+    assert record["source_bit_depth"] == 16
+    assert record["clipped_low_pixels"] == 10 * 128
+    assert record["clipped_high_pixels"] == 55 * 128
+    with pytest.raises(ExportError):
+        inspect_batch(source, replace(settings, crop=(0, 0, 10, 100)))
+    assert list(tmp_path.rglob("manifest.json")) == []
+
+
+def test_cli_inspect_writes_nothing(source, tmp_path):
+    result = CliRunner().invoke(main, [
+        "inspect", str(source), "--display-min", "1000", "--display-max", "20000",
+        "--pixel-size-um", "0.5", "--scale-bar-um", "20", "--synthetic-data",
+    ])
+    assert result.exit_code == 0, result.output
+    assert "40 px" in result.output
+    assert "synthetic.tif" in result.output
+    assert "No files written" in result.output
+    assert list(tmp_path.rglob("*.png")) == []
+    bad = CliRunner().invoke(main, [
+        "inspect", str(source), "--display-min", "4", "--display-max", "4",
+        "--pixel-size-um", "0.5", "--scale-bar-um", "20",
+    ])
+    assert bad.exit_code != 0
+    assert list(tmp_path.rglob("*.png")) == []
 
 
 def test_zero_based_crop_half_up_rounding(source, tmp_path, settings):

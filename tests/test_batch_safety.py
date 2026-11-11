@@ -239,6 +239,17 @@ def test_decode_failure_cli_reports_nonzero_and_keeps_success(tmp_path):
     assert (output / 'aaa.png').is_file() and not (output / 'zzz.png').exists()
 
 
+def test_cli_rejects_zero_width_and_bad_quality(tmp_path):
+    source = tmp_path / "input"
+    image(source / "a.png")
+    output = tmp_path / "output"
+    runner = CliRunner()
+    width = runner.invoke(main, [str(source), "-o", str(output), "-w", "0"])
+    quality = runner.invoke(main, [str(source), "-o", str(output), "-q", "0"])
+    assert width.exit_code != 0 and quality.exit_code != 0
+    assert not output.exists()
+
+
 def test_empty_cli_is_nonzero(tmp_path):
     source = tmp_path / 'empty'; source.mkdir()
     result = CliRunner().invoke(main, [str(source), '-o', str(tmp_path / 'out')])

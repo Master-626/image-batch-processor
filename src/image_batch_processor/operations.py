@@ -2,8 +2,30 @@
 Image manipulation operations implemented via Pillow.
 """
 
-from typing import Optional, Tuple
+import math
+from typing import Optional
+
 from PIL import Image, ImageDraw, ImageFont
+
+# Modes Pillow can encode for each format. Anything else is converted to RGB
+# before saving. Modes listed here are left unchanged so successful conversions
+# keep their previous pixels (for example RGBA PNG stays RGBA; LA JPEG cannot).
+_ENCODABLE_MODES = {
+    "JPEG": {"1", "L", "RGB", "CMYK", "YCbCr"},
+    "PNG": {"1", "L", "LA", "P", "RGB", "RGBA"},
+    "WebP": None,
+    "BMP": {"1", "L", "P", "RGB", "RGBA"},
+    "TIFF": {"1", "L", "LA", "P", "PA", "RGB", "RGBA", "CMYK", "YCbCr", "LAB", "I", "F"},
+}
+
+
+def _positive_int(name: str, value: Optional[int]) -> Optional[int]:
+    """Reject 0 and negatives. They used to be treated as 'not provided'."""
+    if value is None:
+        return None
+    if type(value) is not int or value <= 0:
+        raise ValueError(f"{name} must be a positive integer, got {value!r}.")
+    return value
 
 
 def resize_image(
@@ -13,31 +35,43 @@ def resize_image(
     scale: Optional[float] = None,
     keep_aspect: bool = True,
 ) -> Image.Image:
-    """Resize an image to target dimensions or scale factor."""
+    """Resize an image to target dimensions or scale factor.
+
+    When ``scale`` is set it wins over width and height. A single width or
+    height always scales the other side proportionally; ``keep_aspect`` applies
+    only when both sides are set. Zero is not a way to omit a side.
+    """
     orig_width, orig_height = image.size
 
     if scale is not None:
+        if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale <= 0:
+            raise ValueError(f"scale must be a positive finite number, got {scale!r}.")
         new_width = int(orig_width * scale)
         new_height = int(orig_height * scale)
-    elif target_width and target_height:
-        if keep_aspect:
-            ratio = min(target_width / orig_width, target_height / orig_height)
-            new_width = int(orig_width * ratio)
-            new_height = int(orig_height * ratio)
-        else:
-            new_width = target_width
-            new_height = target_height
-    elif target_width:
-        ratio = target_width / orig_width
-        new_width = target_width
-        new_height = int(orig_height * ratio)
-    elif target_height:
-        ratio = target_height / orig_height
-        new_height = target_height
-        new_width = int(orig_width * ratio)
     else:
-        return image
+        target_width = _positive_int("target_width", target_width)
+        target_height = _positive_int("target_height", target_height)
+        if target_width is not None and target_height is not None:
+            if keep_aspect:
+                ratio = min(target_width / orig_width, target_height / orig_height)
+                new_width = int(orig_width * ratio)
+                new_height = int(orig_height * ratio)
+            else:
+                new_width = target_width
+                new_height = target_height
+        elif target_width is not None:
+            ratio = target_width / orig_width
+            new_width = target_width
+            new_height = int(orig_height * ratio)
+        elif target_height is not None:
+            ratio = target_height / orig_height
+            new_height = target_height
+            new_width = int(orig_width * ratio)
+        else:
+            return image
 
+    if new_width < 1 or new_height < 1:
+        raise ValueError(f"Resize would produce a non-positive image size {new_width}x{new_height}.")
     return image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
 
@@ -60,7 +94,7 @@ def apply_text_watermark(
 
     try:
         font = ImageFont.truetype("arial.ttf", font_size)
-    except IOError:
+    except OSError:
         font = ImageFont.load_default()
 
     # Get text size
@@ -93,8 +127,14 @@ def convert_image_format(
     image: Image.Image,
     output_format: str,
     quality: int = 90,
-) -> Tuple[Image.Image, str]:
-    """Convert image to specified format."""
+) -> tuple[Image.Image, str]:
+    """Convert image to specified format.
+
+    ``quality`` is not applied here. The batch saver passes it to JPEG/WebP
+    when it writes the encoded bytes. Modes the target format cannot store,
+    such as LA to JPEG or CMYK to PNG, are converted to RGB. Modes the format
+    can already store are returned unchanged.
+    """
     format_map = {
         "jpeg": "JPEG",
         "jpg": "JPEG",
@@ -105,9 +145,8 @@ def convert_image_format(
     }
 
     pil_format = format_map.get(output_format.lower(), output_format.upper())
-
-    # JPEG doesn't support transparency
-    if pil_format == "JPEG" and image.mode in ("RGBA", "P"):
+    allowed = _ENCODABLE_MODES.get(pil_format)
+    if allowed is not None and image.mode not in allowed:
         image = image.convert("RGB")
 
     return image, pil_format

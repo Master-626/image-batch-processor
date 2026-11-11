@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Multimedia :: Graphics",
 ]
 dependencies = [
@@ -38,6 +39,7 @@ image-batch-processor = "image_batch_processor.cli:main"
 dev = [
     "pytest>=7.0.0",
     "build>=1.2.0",
+    "ruff>=0.6",
 ]
 
 [project.urls]
@@ -53,3 +55,18 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/image_batch_processor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 170
+src = ["src", "tests", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Existing tests intentionally use compact one-line setup. New tests should not.
+"tests/**/*.py" = ["E701", "E702"]

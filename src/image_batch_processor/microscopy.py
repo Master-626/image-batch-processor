@@ -9,16 +9,18 @@ import json
 import math
 import platform
 import shutil
+import unicodedata
 import zlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
 import PIL
-from PIL import Image, ImageDraw, ImageFont
 import tifffile
+from PIL import Image, ImageDraw, ImageFont
 
 from . import __version__
+from .core import BatchSafetyError, _portable_name
 
 SCHEMA = "ibp-microscopy-export-v1"
 MAX_FILE_BYTES = 256 * 1024 * 1024
@@ -151,28 +153,48 @@ def render(array: np.ndarray, settings: ExportSettings) -> tuple[Image.Image, di
     return result, metadata
 
 
-def _inputs(input_dir: Path, output_dir: Path) -> tuple[Path, Path, list[Path]]:
+def _open_input(input_dir: Path) -> Path:
     if input_dir.is_symlink():
         raise ExportError("Input directory may not be a symbolic link.")
-    root, output = input_dir.resolve(), output_dir.resolve()
+    root = input_dir.resolve()
     if not root.is_dir():
         raise ExportError("Input must be an existing directory.")
+    return root
+
+
+def _filename_key(name: str) -> str:
+    """Case-insensitive and Unicode-normalized, matching the legacy batch checker."""
+    return unicodedata.normalize("NFC", name).casefold()
+
+
+def _list_tiffs(root: Path) -> list[Path]:
+    files = sorted((p for p in root.iterdir() if p.suffix.lower() in (".tif", ".tiff")), key=lambda p: p.name)
+    if not files:
+        raise ExportError("No .tif / .tiff files found in the input directory (non-recursive).")
+    if any(not p.is_file() or p.is_symlink() for p in files):
+        raise ExportError("Every TIFF entry must be a regular file, not a directory or symbolic link.")
+    if len({_filename_key(p.name) for p in files}) != len(files):
+        raise ExportError("TIFF names collide on case-insensitive or Unicode-normalized filesystems.")
+    if any(any(ord(c) < 32 or ord(c) == 127 for c in p.name) or p.name.lstrip()[0] in "=+-@" for p in files):
+        raise ExportError("Rename TIFFs with control characters or spreadsheet formula prefixes.")
+    for path in files:
+        try:
+            _portable_name(path.name, kind="TIFF")
+        except BatchSafetyError as exc:
+            raise ExportError(str(exc)) from exc
+    return files
+
+
+def _inputs(input_dir: Path, output_dir: Path) -> tuple[Path, Path, list[Path]]:
+    root = _open_input(input_dir)
+    output = output_dir.resolve()
     if output == root or root in output.parents or output in root.parents:
         raise ExportError("Input and output must be separate, non-overlapping directories.")
     if output_dir.exists() or output_dir.is_symlink():
         raise ExportError("Output already exists. Choose a new directory; overwriting is never allowed.")
     if not output.parent.is_dir():
         raise ExportError("Output parent must already exist.")
-    files = sorted((p for p in root.iterdir() if p.suffix.lower() in (".tif", ".tiff")), key=lambda p: p.name)
-    if not files:
-        raise ExportError("No .tif / .tiff files found in the input directory (non-recursive).")
-    if any(not p.is_file() or p.is_symlink() for p in files):
-        raise ExportError("Every TIFF entry must be a regular file, not a directory or symbolic link.")
-    if len({p.name.casefold() for p in files}) != len(files):
-        raise ExportError("TIFF names collide on case-insensitive filesystems.")
-    if any(any(ord(c) < 32 or ord(c) == 127 for c in p.name) or p.name.lstrip()[0] in "=+-@" for p in files):
-        raise ExportError("Rename TIFFs with control characters or spreadsheet formula prefixes.")
-    return root, output, files
+    return root, output, _list_tiffs(root)
 
 
 def export_batch(input_dir: str | Path, output_dir: str | Path, settings: ExportSettings,
@@ -234,6 +256,33 @@ def export_batch(input_dir: str | Path, output_dir: str | Path, settings: Export
         shutil.rmtree(output)
         raise
     return manifest
+
+
+def inspect_batch(input_dir: str | Path, settings: ExportSettings) -> dict:
+    """Report how export would render this folder. Does not create files.
+
+    The pixel size is whatever the caller typed. TIFF resolution and OME
+    calibration metadata are not read, and nothing is marked as confirmed.
+    """
+    settings.validate()
+    records = []
+    for source in _list_tiffs(_open_input(Path(input_dir))):
+        array, source_hash = read_tiff(source)
+        image, record = render(array, settings)
+        image.close()
+        record = dict(record)
+        record["source"] = source.name
+        record["source_sha256"] = source_hash
+        records.append(record)
+    return {
+        "schema": SCHEMA,
+        "file_count": len(records),
+        "settings": asdict(settings),
+        "calibration": "not verified; TIFF calibration metadata is not read",
+        "scale_bar_pixels": records[0]["scale_bar_pixels"],
+        "scale_bar_label": records[0]["scale_bar_label"],
+        "files": records,
+    }
 
 
 def replay_batch(input_dir: str | Path, output_dir: str | Path, manifest_path: str | Path,

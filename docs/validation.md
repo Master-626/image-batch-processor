@@ -16,6 +16,8 @@ The user must independently verify that `pixel_size_um` describes square pixels 
 
 The source hash is computed from exactly the bytes passed to the decoder. It includes metadata, not just pixel values. The `image_pixel_sha256` hashes row-major uint8 crop/display pixels before the footer. `output_sha256` hashes the complete PNG. Replay checks source and output hashes. JSON contains the full recipe; CSV is a human-readable summary.
 
+`ibp-micro inspect` runs the same input, crop, and scale-bar checks and returns clipped-pixel counts, but it does not write a directory and does not record calibration as confirmed. TIFF filenames must be portable and unique after Unicode NFC normalization and case folding, so two names that would become one file on macOS or Windows are rejected on every platform.
+
 No absolute paths, timestamps, or source TIFF metadata are copied into the manifest. Basenames are retained. Same settings, source bytes and recorded dependency versions are intended to yield the same PNG bytes. Software versions are recorded, not locked by the tool; users must preserve their environment to reproduce older outputs. An altered manifest can redefine the expected values and is not a security signature.
 
 ## Data and testing limits
